@@ -49,6 +49,7 @@ pub struct Options {
     brackets: Brackets,
     string_syntax: StringSyntax,
     char_syntax: CharSyntax,
+    kicad_symbol: KiSymbol,
 }
 
 /// Defines the treatment of the symbol `nil`.
@@ -96,6 +97,16 @@ pub enum Brackets {
     Vector,
 }
 
+/// Defines the treatment of KiCad symbols.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum KiSymbol {
+    /// Parse KiCad specific symbols
+    True,
+
+    /// Don't parse them in a specific way
+    Default,
+}
+
 impl Options {
     /// Construct an empty set of options.
     ///
@@ -109,6 +120,7 @@ impl Options {
             brackets: Brackets::List,
             string_syntax: StringSyntax::R6RS,
             char_syntax: CharSyntax::R6RS,
+            kicad_symbol: KiSymbol::Default,
         }
     }
 
@@ -120,6 +132,12 @@ impl Options {
             .with_brackets(Brackets::Vector)
             .with_string_syntax(StringSyntax::Elisp)
             .with_char_syntax(CharSyntax::Elisp)
+    }
+
+    /// Construct a set of options suitable for parsing KiCad PCB files
+    pub fn kicad() -> Self {
+        Self::new()
+            .with_kicad_symbol(KiSymbol::True)
     }
 
     /// Add `syntax` to the recognized keyword syntaxes.
@@ -170,6 +188,12 @@ impl Options {
         self
     }
 
+    /// Choose to handle KiCad specific syntax
+    pub fn with_kicad_symbol(mut self, syntax: KiSymbol) -> Self {
+        self.kicad_symbol = syntax;
+        self
+    }
+
     /// Check wether a keyword syntax is enabled.
     #[inline]
     pub fn keyword_syntax(self, syntax: KeywordSyntax) -> bool {
@@ -200,6 +224,11 @@ impl Options {
     pub fn char_syntax(self) -> CharSyntax {
         self.char_syntax
     }
+
+    /// Query the way the kicad specific symbols are handled.
+    pub fn kicad_symbol(self) -> KiSymbol {
+        self.kicad_symbol
+    }
 }
 
 impl Default for Options {
@@ -217,6 +246,7 @@ impl Default for Options {
             brackets: Brackets::List,
             string_syntax: StringSyntax::R6RS,
             char_syntax: CharSyntax::R6RS,
+            kicad_symbol: KiSymbol::Default,
         }
     }
 }
@@ -236,6 +266,9 @@ enum Token {
     Quotation(&'static str),
     VecOpen(u8),
     ByteVecOpen(u8),
+    KiHexNumber(Box<str>),
+    KiHost(Box<str>),
+    KiLayerSelection(Box<str>),
 }
 
 impl<'de, R> Parser<R>
@@ -567,6 +600,21 @@ impl<'de, R: Read<'de>> Parser<R> {
                         TSymbol::True => Token::Bool(true),
                         TSymbol::Default => unreachable!(),
                     }
+                } else if self.options.kicad_symbol() != KiSymbol::Default && name == "host" {
+                    match self.options.kicad_symbol() {
+                        KiSymbol::True => Token::KiHost(name.into()),
+                        KiSymbol::Default => unreachable!(),
+                    }
+                } else if self.options.kicad_symbol() != KiSymbol::Default && (name == "tstamp" || name == "tedit" || name == "visible_elements") {
+                    match self.options.kicad_symbol() {
+                        KiSymbol::True => Token::KiHexNumber(name.into()),
+                        KiSymbol::Default => unreachable!(),
+                    }
+                } else if self.options.kicad_symbol() != KiSymbol::Default && name == "layerselection" {
+                    match self.options.kicad_symbol() {
+                        KiSymbol::True => Token::KiLayerSelection(name.into()),
+                        KiSymbol::Default => unreachable!(),
+                    }
                 } else {
                     Token::Symbol(name.into())
                 }
@@ -664,6 +712,28 @@ impl<'de, R: Read<'de>> Parser<R> {
                     .ok_or_else(|| self.peek_error(ErrorCode::EofWhileParsingList))?;
                 Value::list(vec![Value::symbol(name), datum])
             }
+            Token::KiHost(name) => {
+                // always expect the host and version variables
+                let ws = self.parse_whitespace();
+                let host = Value::symbol(self.parse_symbol()?);
+                let ws = self.parse_whitespace();
+                let version = Value::symbol(self.parse_symbol()?);
+
+                Value::list(vec![Value::symbol(name), host, version])
+            }
+            Token::KiHexNumber(name) => {
+                let ws = self.parse_whitespace();
+                let ts = Value::Number(self.parse_num_literal(16, true)?);
+
+                Value::list(vec![Value::symbol(name), ts])
+            }
+            Token::KiLayerSelection(name) => {
+                // always expect the host and version variables
+                let ws = self.parse_whitespace();
+                let sel = Value::symbol(self.parse_symbol()?);
+
+                Value::list(vec![Value::symbol(name), sel])
+            }
         };
         Ok(Some(value))
     }
@@ -754,6 +824,18 @@ impl<'de, R: Read<'de>> Parser<R> {
                     .next_datum()?
                     .ok_or_else(|| self.peek_error(ErrorCode::EofWhileParsingList))?;
                 Datum::quotation(name, quoted, Span::new(start, token_end))
+            }
+            Token::KiHost(name) => {
+                // TODO: fix this
+                primitive(Value::Symbol(name), self)
+            }
+            Token::KiHexNumber(name) => {
+                // TODO: fix this
+                primitive(Value::Symbol(name), self)
+            }
+            Token::KiLayerSelection(name) => {
+                // TODO: fix this
+                primitive(Value::Symbol(name), self)
             }
         };
         Ok(Some(syntax))
@@ -1042,7 +1124,7 @@ impl<'de, R: Read<'de>> Parser<R> {
             };
             if digit >= radix {
                 return Err(self.peek_error(ErrorCode::InvalidNumber));
-            }
+            }    
             self.eat_char();
             let digit = u64::from(digit);
             // We need to be careful with overflow. If we can, try to keep the
