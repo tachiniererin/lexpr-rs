@@ -136,8 +136,7 @@ impl Options {
 
     /// Construct a set of options suitable for parsing KiCad PCB files
     pub fn kicad() -> Self {
-        Self::new()
-            .with_kicad_symbol(KiSymbol::True)
+        Self::new().with_kicad_symbol(KiSymbol::True)
     }
 
     /// Add `syntax` to the recognized keyword syntaxes.
@@ -605,12 +604,16 @@ impl<'de, R: Read<'de>> Parser<R> {
                         KiSymbol::True => Token::KiHost(name.into()),
                         KiSymbol::Default => unreachable!(),
                     }
-                } else if self.options.kicad_symbol() != KiSymbol::Default && (name == "tstamp" || name == "tedit" || name == "visible_elements") {
+                } else if self.options.kicad_symbol() != KiSymbol::Default
+                    && (name == "tstamp" || name == "tedit" || name == "visible_elements")
+                {
                     match self.options.kicad_symbol() {
                         KiSymbol::True => Token::KiHexNumber(name.into()),
                         KiSymbol::Default => unreachable!(),
                     }
-                } else if self.options.kicad_symbol() != KiSymbol::Default && name == "layerselection" {
+                } else if self.options.kicad_symbol() != KiSymbol::Default
+                    && name == "layerselection"
+                {
                     match self.options.kicad_symbol() {
                         KiSymbol::True => Token::KiLayerSelection(name.into()),
                         KiSymbol::Default => unreachable!(),
@@ -714,22 +717,22 @@ impl<'de, R: Read<'de>> Parser<R> {
             }
             Token::KiHost(name) => {
                 // always expect the host and version variables
-                let ws = self.parse_whitespace();
+                let _ws = self.parse_whitespace();
                 let host = Value::symbol(self.parse_symbol()?);
-                let ws = self.parse_whitespace();
+                let _ws = self.parse_whitespace();
                 let version = Value::symbol(self.parse_symbol()?);
 
                 Value::list(vec![Value::symbol(name), host, version])
             }
             Token::KiHexNumber(name) => {
-                let ws = self.parse_whitespace();
-                let ts = Value::Number(self.parse_num_literal(16, true)?);
+                let _ws = self.parse_whitespace();
+                let ts = Value::symbol(self.parse_symbol()?);
 
                 Value::list(vec![Value::symbol(name), ts])
             }
             Token::KiLayerSelection(name) => {
                 // always expect the host and version variables
-                let ws = self.parse_whitespace();
+                let _ws = self.parse_whitespace();
                 let sel = Value::symbol(self.parse_symbol()?);
 
                 Value::list(vec![Value::symbol(name), sel])
@@ -1124,7 +1127,7 @@ impl<'de, R: Read<'de>> Parser<R> {
             };
             if digit >= radix {
                 return Err(self.peek_error(ErrorCode::InvalidNumber));
-            }    
+            }
             self.eat_char();
             let digit = u64::from(digit);
             // We need to be careful with overflow. If we can, try to keep the
